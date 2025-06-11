@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Imposter-Spiel</title>
+  <style>
+    body { font-family: sans-serif; max-width: 480px; margin: auto; }
+    #chat { border:1px solid #aaa; height:180px; overflow-y:scroll; margin-bottom:8px; padding:4px; }
+    #players { margin:8px 0; }
+    .hidden { display:none; }
+  </style>
+</head>
+<body>
+  <h1>Imposter-Spiel</h1>
+  <div id="joinArea">
+    <button onclick="showCreate()">Spiel erstellen</button>
+    <button onclick="showJoin()">Spiel beitreten</button>
+    <div id="create" class="hidden">
+      <input id="nameCreate" placeholder="Dein Name"><button onclick="createLobby()">Erstellen</button>
+    </div>
+    <div id="join" class="hidden">
+      <input id="nameJoin" placeholder="Dein Name">
+      <input id="codeJoin" placeholder="Code">
+      <button onclick="joinLobby()">Beitreten</button>
+    </div>
+    <div id="lobbyInfo" class="hidden">
+      <p>Lobby-Code: <span id="lobbyCode"></span></p>
+      <div id="players"></div>
+      <button onclick="startGame()">Spiel starten</button>
+    </div>
+  </div>
+
+  <div id="gameArea" class="hidden">
+    <div id="roleArea"></div>
+    <div id="chat"></div>
+    <input id="chatInput" placeholder="Nachricht" onkeydown="if(event.key==='Enter') sendChat()">
+    <button onclick="sendChat()">Senden</button>
+    <button onclick="showVote()">Abstimmen</button>
+  </div>
+
+  <div id="voteArea" class="hidden">
+    <p>Wen wählst du?</p>
+    <div id="voteList"></div>
+  </div>
+
+  <div id="resultArea" class="hidden">
+    <p id="resultText"></p>
+    <button onclick="location.reload()">Neue Runde</button>
+  </div>
+
+  <script>
+    let ws, myName, myRole, players = [];
+    function showCreate(){
+      document.getElementById('create').classList.remove('hidden');
+      document.getElementById('join').classList.add('hidden');
+    }
+    function showJoin(){
+      document.getElementById('join').classList.remove('hidden');
+      document.getElementById('create').classList.add('hidden');
+    }
+    function createLobby(){
+      myName = document.getElementById('nameCreate').value.trim();
+      if (!myName) return alert('Name?');
+      ws = new WebSocket(`ws://${location.host}`);
+      ws.onopen = ()=> ws.send(JSON.stringify({ type: 'createLobby' }));
+      setup();
+    }
+    function joinLobby(){
+      myName = document.getElementById('nameJoin').value.trim();
+      const code = document.getElementById('codeJoin').value.trim().toUpperCase();
+      if (!myName || !code) return alert('Name & Code?');
+      ws = new WebSocket(`ws://${location.host}`);
+      ws.onopen = ()=> ws.send(JSON.stringify({ type: 'joinLobby', code, name: myName }));
+      setup();
+    }
+    function setup(){
+      ws.onmessage = m=>{
+        const d = JSON.parse(m.data);
+        if (d.type==='lobbyCreated'){
+          document.getElementById('lobbyCode').innerText = d.code;
+          document.getElementById('lobbyInfo').classList.remove('hidden');
+        }
+        if (d.type==='updatePlayers'){
+          players = d.players;
+          document.getElementById('players').innerText = 'Spieler: ' + players.join(', ');
+        }
+        if (d.type==='role'){
+          myRole = d.role;
+          document.getElementById('roleArea').innerHTML = myRole==='imposter'
+            ? 'Du bist Imposter! Errate das Wort!'
+            : 'Geheimes Wort: <b>' + d.word + '</b>';
+          document.getElementById('gameArea').classList.remove('hidden');
+          document.getElementById('joinArea').classList.add('hidden');
+        }
+        if (d.type==='gameStarted'){
+          document.getElementById('chat').innerHTML = '';
+        }
+        if (d.type==='chat'){
+          const div = document.createElement('div');
+          div.innerHTML = `<b>${d.msg.name}:</b> ${d.msg.text}`;
+          document.getElementById('chat').appendChild(div);
+          document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
+        }
+        if (d.type==='error') alert(d.message);
+        if (d.type==='result'){
+          document.getElementById('gameArea').classList.add('hidden');
+          document.getElementById('voteArea').classList.add('hidden');
+          document.getElementById('resultArea').classList.remove('hidden');
+          document.getElementById('resultText').innerHTML =
+            `<b>Rausgewählt:</b> ${d.votedOut.join(', ')}<br>` +
+            `<b>Imposter:</b> ${d.imposters.join(', ')}`;
+        }
+      };
+    }
+    function startGame(){
+      ws.send(JSON.stringify({ type: 'startGame', code: document.getElementById('lobbyCode').innerText }));
+    }
+    function sendChat(){
+      const t = document.getElementById('chatInput').value.trim();
+      if (t) ws.send(JSON.stringify({ type: 'chat', text: t }));
+      document.getElementById('chatInput').value = '';
+    }
+    function showVote(){
+      document.getElementById('voteArea').classList.remove('hidden');
+      document.getElementById('gameArea').classList.add('hidden');
+      const list = document.getElementById('voteList');
+      list.innerHTML = '';
+      players.forEach(n=>{
+        const btn = document.createElement('button');
+        btn.innerText = n;
+        btn.onclick=()=>{
+          ws.send(JSON.stringify({ type: 'vote', voted: n }));
+          list.innerHTML = 'Abgestimmt – bitte warten.';
+        };
+        list.appendChild(btn);
+      });
+    }
+  </script>
+</body>
+</html>
